@@ -1,8 +1,8 @@
 name: "Facial Recognition"
 description: "DeepFace facial recognition server for HA Video Vision"
-version: "1.0.0"
+version: "1.0.1"
 slug: "facial_recognition"
-init: false
+init: true
 arch:
   - amd64
   - aarch64
