@@ -16,12 +16,12 @@ export MIN_FACE_CONFIDENCE="${MIN_FACE_CONFIDENCE}"
 export MIN_FACE_SIZE="${MIN_FACE_SIZE}"
 export MODEL_NAME="${MODEL_NAME}"
 export DETECTOR_BACKEND="${DETECTOR_BACKEND}"
-export FACES_DIR="/share/faces"
+export FACES_DIR="/config/camera_faces"
 export HOST="0.0.0.0"
 export PORT="8100"
 
 # Create faces directory if it doesn't exist
-mkdir -p /share/faces
+mkdir -p /config/camera_faces
 
 echo "Starting Facial Recognition Server..."
 echo "Faces directory: ${FACES_DIR}"
