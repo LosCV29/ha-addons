@@ -1,24 +1,25 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-# Set environment
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies (Alpine packages)
+RUN apk add --no-cache \
     python3 \
-    python3-pip \
+    py3-pip \
     python3-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+    build-base \
+    cmake \
+    mesa-gl \
+    glib \
+    libsm \
+    libxext \
+    libxrender \
+    libgomp \
+    jpeg-dev \
+    zlib-dev \
+    freetype-dev
 
 # Install Python packages
-RUN pip3 install --no-cache-dir \
+RUN pip3 install --no-cache-dir --break-system-packages \
     fastapi \
     uvicorn[standard] \
     deepface \
