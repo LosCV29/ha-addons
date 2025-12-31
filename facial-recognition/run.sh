@@ -1,11 +1,14 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/bash
+set -e
 
-# Read configuration from add-on options
-DISTANCE_THRESHOLD=$(bashio::config 'distance_threshold')
-MIN_FACE_CONFIDENCE=$(bashio::config 'min_face_confidence')
-MIN_FACE_SIZE=$(bashio::config 'min_face_size')
-MODEL_NAME=$(bashio::config 'model_name')
-DETECTOR_BACKEND=$(bashio::config 'detector_backend')
+# Read configuration from add-on options using jq
+OPTIONS_FILE="/data/options.json"
+
+DISTANCE_THRESHOLD=$(jq -r '.distance_threshold' "$OPTIONS_FILE")
+MIN_FACE_CONFIDENCE=$(jq -r '.min_face_confidence' "$OPTIONS_FILE")
+MIN_FACE_SIZE=$(jq -r '.min_face_size' "$OPTIONS_FILE")
+MODEL_NAME=$(jq -r '.model_name' "$OPTIONS_FILE")
+DETECTOR_BACKEND=$(jq -r '.detector_backend' "$OPTIONS_FILE")
 
 # Set environment variables
 export DISTANCE_THRESHOLD="${DISTANCE_THRESHOLD}"
@@ -20,11 +23,11 @@ export PORT="8100"
 # Create faces directory if it doesn't exist
 mkdir -p /share/faces
 
-bashio::log.info "Starting Facial Recognition Server..."
-bashio::log.info "Faces directory: ${FACES_DIR}"
-bashio::log.info "Model: ${MODEL_NAME}"
-bashio::log.info "Distance threshold: ${DISTANCE_THRESHOLD}"
-bashio::log.info "Detector: ${DETECTOR_BACKEND}"
+echo "Starting Facial Recognition Server..."
+echo "Faces directory: ${FACES_DIR}"
+echo "Model: ${MODEL_NAME}"
+echo "Distance threshold: ${DISTANCE_THRESHOLD}"
+echo "Detector: ${DETECTOR_BACKEND}"
 
 # Start the server
 exec python3 /server.py
