@@ -124,7 +124,7 @@ def load_known_faces() -> dict[str, list[np.ndarray]]:
         logger.warning(f"Faces directory does not exist: {FACES_DIR}")
         logger.info(f"Creating directory: {FACES_DIR}")
         faces_path.mkdir(parents=True, exist_ok=True)
-        logger.info("Add photos to /share/faces/PersonName/ folders")
+        logger.info(f"Add photos to {FACES_DIR}/PersonName/ folders")
         return {}
 
     image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -361,8 +361,8 @@ async def startup_event():
     if not known_faces:
         logger.info("")
         logger.info("No faces loaded! To add people:")
-        logger.info("1. Go to /share/faces/ via Samba or SSH")
-        logger.info("2. Create a folder for each person (e.g., /share/faces/John/)")
+        logger.info(f"1. Go to {FACES_DIR} via Samba or SSH")
+        logger.info(f"2. Create a folder for each person (e.g., {FACES_DIR}/John/")
         logger.info("3. Add 3-5 photos of their face to the folder")
         logger.info("4. Restart this add-on or call POST /reload")
         logger.info("")
