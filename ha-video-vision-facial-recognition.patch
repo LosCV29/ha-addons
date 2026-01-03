@@ -1,0 +1,368 @@
+From f7356625643eb26a1e6c31ac12b060cc01436b1a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Jan 2026 23:15:34 +0000
+Subject: [PATCH] Add facial recognition integration with DeepFace addon
+
+---
+ custom_components/ha_video_vision/__init__.py | 120 +++++++++++++++++-
+ .../ha_video_vision/config_flow.py            |  44 +++++++
+ custom_components/ha_video_vision/const.py    |  11 ++
+ .../ha_video_vision/manifest.json             |   2 +-
+ .../ha_video_vision/services.yaml             |  18 +++
+ .../ha_video_vision/strings.json              |  11 +-
+ 6 files changed, 200 insertions(+), 6 deletions(-)
+
+diff --git a/custom_components/ha_video_vision/__init__.py b/custom_components/ha_video_vision/__init__.py
+index b4c32b5..0cab131 100644
+--- a/custom_components/ha_video_vision/__init__.py
++++ b/custom_components/ha_video_vision/__init__.py
+@@ -57,13 +57,20 @@ from .const import (
+     CONF_SNAPSHOT_QUALITY,
+     DEFAULT_SNAPSHOT_DIR,
+     DEFAULT_SNAPSHOT_QUALITY,
++    # Facial Recognition
++    CONF_FACIAL_RECOGNITION_URL,
++    CONF_FACIAL_RECOGNITION_ENABLED,
++    DEFAULT_FACIAL_RECOGNITION_URL,
++    DEFAULT_FACIAL_RECOGNITION_ENABLED,
+     # Services
+     SERVICE_ANALYZE_CAMERA,
+     SERVICE_RECORD_CLIP,
++    SERVICE_IDENTIFY_FACES,
+     # Attributes
+     ATTR_CAMERA,
+     ATTR_DURATION,
+     ATTR_USER_QUERY,
++    ATTR_IMAGE,
+ )
+ 
+ _LOGGER = logging.getLogger(__name__)
+@@ -144,6 +151,13 @@ SERVICE_RECORD_SCHEMA = vol.Schema(
+     }
+ )
+ 
++SERVICE_IDENTIFY_SCHEMA = vol.Schema(
++    {
++        vol.Optional(ATTR_CAMERA): cv.string,
++        vol.Optional(ATTR_IMAGE): cv.string,
++    }
++)
++
+ 
+ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+     """Set up the HA Video Vision component."""
+@@ -207,6 +221,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+ 
+         return await analyzer.record_clip(camera, duration)
+ 
++    async def handle_identify_faces(call: ServiceCall) -> dict[str, Any]:
++        """Handle identify_faces service call."""
++        camera = call.data.get(ATTR_CAMERA)
++        image_base64 = call.data.get(ATTR_IMAGE)
++
++        return await analyzer.identify_faces(camera=camera, image_base64=image_base64)
++
+     # Register services with response support
+     hass.services.async_register(
+         DOMAIN,
+@@ -224,6 +245,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+         supports_response=True,
+     )
+ 
++    hass.services.async_register(
++        DOMAIN,
++        SERVICE_IDENTIFY_FACES,
++        handle_identify_faces,
++        schema=SERVICE_IDENTIFY_SCHEMA,
++        supports_response=True,
++    )
++
+     # Listen for option updates
+     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+ 
+@@ -244,6 +273,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+     # Remove services
+     hass.services.async_remove(DOMAIN, SERVICE_ANALYZE_CAMERA)
+     hass.services.async_remove(DOMAIN, SERVICE_RECORD_CLIP)
++    hass.services.async_remove(DOMAIN, SERVICE_IDENTIFY_FACES)
+ 
+     hass.data[DOMAIN].pop(entry.entry_id, None)
+     return True
+@@ -300,9 +330,14 @@ class VideoAnalyzer:
+         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
+         self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
+ 
++        # Facial recognition settings
++        self.facial_recognition_url = config.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
++        self.facial_recognition_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
++
+         _LOGGER.info(
+-            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
+-            self.provider, len(self.selected_cameras), self.video_width
++            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, Facial Recognition: %s",
++            self.provider, len(self.selected_cameras), self.video_width,
++            "enabled" if self.facial_recognition_enabled else "disabled"
+         )
+         # Log configured providers
+         if self.provider_configs:
+@@ -1006,7 +1041,7 @@ class VideoAnalyzer:
+                 "max_tokens": self.vllm_max_tokens,
+                 "temperature": self.vllm_temperature,
+             }
+-            
++
+             async with asyncio.timeout(120):
+                 async with self._session.post(url, json=payload) as response:
+                     if response.status == 200:
+@@ -1026,7 +1061,84 @@ class VideoAnalyzer:
+                         error = await response.text()
+                         _LOGGER.error("Local vLLM error: %s", error[:500])
+                         return f"Analysis failed: {response.status}"
+-                        
++
+         except Exception as e:
+             _LOGGER.error("Local vLLM error: %s", e)
+             return f"Analysis error: {str(e)}"
++
++    async def identify_faces(
++        self, camera: str | None = None, image_base64: str | None = None
++    ) -> dict[str, Any]:
++        """Identify faces in an image using the facial recognition addon.
++
++        Args:
++            camera: Camera name/entity to get snapshot from (optional)
++            image_base64: Base64-encoded image data (optional)
++
++        Returns:
++            Dictionary with identification results
++        """
++        if not self.facial_recognition_enabled:
++            return {
++                "success": False,
++                "error": "Facial recognition is not enabled. Configure it in integration options."
++            }
++
++        # Get image data
++        image_bytes = None
++
++        if image_base64:
++            # Use provided base64 image
++            try:
++                image_bytes = base64.b64decode(image_base64)
++            except Exception as e:
++                return {"success": False, "error": f"Invalid base64 image: {e}"}
++        elif camera:
++            # Get snapshot from camera
++            entity_id = self._find_camera_entity(camera)
++            if not entity_id:
++                available = ", ".join(self.selected_cameras) if self.selected_cameras else "None configured"
++                return {
++                    "success": False,
++                    "error": f"Camera '{camera}' not found. Available: {available}"
++                }
++            image_bytes = await self._get_camera_snapshot(entity_id)
++            if not image_bytes:
++                return {"success": False, "error": f"Could not get snapshot from {entity_id}"}
++        else:
++            return {"success": False, "error": "Either 'camera' or 'image' parameter is required"}
++
++        # Send to facial recognition server
++        try:
++            url = f"{self.facial_recognition_url}/identify"
++            image_b64 = base64.b64encode(image_bytes).decode()
++
++            payload = {"image_base64": image_b64}
++
++            async with asyncio.timeout(30):
++                async with self._session.post(url, json=payload) as response:
++                    if response.status == 200:
++                        result = await response.json()
++                        _LOGGER.info(
++                            "Facial recognition result: %s",
++                            result.get("summary", "No summary")
++                        )
++                        return result
++                    else:
++                        error = await response.text()
++                        _LOGGER.error("Facial recognition error: %s", error[:500])
++                        return {
++                            "success": False,
++                            "error": f"Facial recognition server returned {response.status}"
++                        }
++
++        except asyncio.TimeoutError:
++            return {"success": False, "error": "Facial recognition request timed out"}
++        except aiohttp.ClientConnectorError:
++            return {
++                "success": False,
++                "error": f"Cannot connect to facial recognition server at {self.facial_recognition_url}. Is the addon running?"
++            }
++        except Exception as e:
++            _LOGGER.error("Facial recognition error: %s", e)
++            return {"success": False, "error": str(e)}
+diff --git a/custom_components/ha_video_vision/config_flow.py b/custom_components/ha_video_vision/config_flow.py
+index 3f735ea..5dd3917 100644
+--- a/custom_components/ha_video_vision/config_flow.py
++++ b/custom_components/ha_video_vision/config_flow.py
+@@ -53,6 +53,11 @@ from .const import (
+     CONF_SNAPSHOT_QUALITY,
+     DEFAULT_SNAPSHOT_DIR,
+     DEFAULT_SNAPSHOT_QUALITY,
++    # Facial Recognition
++    CONF_FACIAL_RECOGNITION_URL,
++    CONF_FACIAL_RECOGNITION_ENABLED,
++    DEFAULT_FACIAL_RECOGNITION_URL,
++    DEFAULT_FACIAL_RECOGNITION_ENABLED,
+ )
+ 
+ _LOGGER = logging.getLogger(__name__)
+@@ -330,6 +335,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
+                 "voice_aliases": "Voice Aliases",
+                 "video_quality": "Video Quality",
+                 "ai_settings": "AI Settings",
++                "facial_recognition": "Facial Recognition",
+             },
+         )
+ 
+@@ -798,3 +804,41 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
+                 "temp_hint": "Lower = more consistent/factual. Higher = more creative.",
+             },
+         )
++
++    async def async_step_facial_recognition(
++        self, user_input: dict[str, Any] | None = None
++    ) -> FlowResult:
++        """Handle facial recognition settings."""
++        errors = {}
++        current = {**self._entry.data, **self._entry.options}
++
++        if user_input is not None:
++            # Test connection if enabled
++            if user_input.get(CONF_FACIAL_RECOGNITION_ENABLED, False):
++                url = user_input.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
++                try:
++                    async with aiohttp.ClientSession() as session:
++                        async with session.get(f"{url}/status", timeout=aiohttp.ClientTimeout(total=5)) as response:
++                            if response.status != 200:
++                                errors["base"] = "cannot_connect"
++                except Exception:
++                    errors["base"] = "cannot_connect"
++
++            if not errors:
++                new_options = {**self._entry.options, **user_input}
++                return self.async_create_entry(title="", data=new_options)
++
++        return self.async_show_form(
++            step_id="facial_recognition",
++            data_schema=vol.Schema({
++                vol.Required(
++                    CONF_FACIAL_RECOGNITION_ENABLED,
++                    default=current.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
++                ): selector.BooleanSelector(),
++                vol.Required(
++                    CONF_FACIAL_RECOGNITION_URL,
++                    default=current.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
++                ): str,
++            }),
++            errors=errors,
++        )
+diff --git a/custom_components/ha_video_vision/const.py b/custom_components/ha_video_vision/const.py
+index f019f65..8b67b51 100644
+--- a/custom_components/ha_video_vision/const.py
++++ b/custom_components/ha_video_vision/const.py
+@@ -103,11 +103,21 @@ CONF_SNAPSHOT_QUALITY: Final = "snapshot_quality"
+ DEFAULT_SNAPSHOT_DIR: Final = "/media/ha_video_vision"
+ DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
+ 
++# =============================================================================
++# FACIAL RECOGNITION SETTINGS
++# =============================================================================
++CONF_FACIAL_RECOGNITION_URL: Final = "facial_recognition_url"
++CONF_FACIAL_RECOGNITION_ENABLED: Final = "facial_recognition_enabled"
++
++DEFAULT_FACIAL_RECOGNITION_URL: Final = "http://localhost:8100"
++DEFAULT_FACIAL_RECOGNITION_ENABLED: Final = False
++
+ # =============================================================================
+ # SERVICE NAMES
+ # =============================================================================
+ SERVICE_ANALYZE_CAMERA: Final = "analyze_camera"
+ SERVICE_RECORD_CLIP: Final = "record_clip"
++SERVICE_IDENTIFY_FACES: Final = "identify_faces"
+ 
+ # =============================================================================
+ # ATTRIBUTES
+@@ -117,3 +127,4 @@ ATTR_DURATION: Final = "duration"
+ ATTR_USER_QUERY: Final = "user_query"
+ ATTR_NOTIFY: Final = "notify"
+ ATTR_PROVIDER: Final = "provider"
++ATTR_IMAGE: Final = "image"
+diff --git a/custom_components/ha_video_vision/manifest.json b/custom_components/ha_video_vision/manifest.json
+index 33df3c4..6ccdbb8 100644
+--- a/custom_components/ha_video_vision/manifest.json
++++ b/custom_components/ha_video_vision/manifest.json
+@@ -8,5 +8,5 @@
+   "issue_tracker": "https://github.com/LosCV29/ha-video-vision/issues",
+   "iot_class": "local_polling",
+   "requirements": ["aiohttp>=3.8.0", "aiofiles>=23.0.0"],
+-  "version": "4.5.3"
++  "version": "4.6.0"
+ }
+diff --git a/custom_components/ha_video_vision/services.yaml b/custom_components/ha_video_vision/services.yaml
+index 0898e37..d80a578 100644
+--- a/custom_components/ha_video_vision/services.yaml
++++ b/custom_components/ha_video_vision/services.yaml
+@@ -52,3 +52,21 @@ record_clip:
+           step: 1
+           unit_of_measurement: seconds
+ 
++identify_faces:
++  name: Identify Faces
++  description: Identify faces in an image using the facial recognition addon.
++  fields:
++    camera:
++      name: Camera
++      description: Camera name or alias to get snapshot from
++      required: false
++      example: "front_door"
++      selector:
++        text:
++    image:
++      name: Image
++      description: Base64-encoded image data (alternative to camera)
++      required: false
++      selector:
++        text:
++          multiline: true
+diff --git a/custom_components/ha_video_vision/strings.json b/custom_components/ha_video_vision/strings.json
+index c8f0e5e..1e569b3 100644
+--- a/custom_components/ha_video_vision/strings.json
++++ b/custom_components/ha_video_vision/strings.json
+@@ -49,7 +49,8 @@
+           "cameras": "Select Cameras",
+           "voice_aliases": "Voice Aliases",
+           "video_quality": "Video Quality",
+-          "ai_settings": "AI Settings"
++          "ai_settings": "AI Settings",
++          "facial_recognition": "Facial Recognition"
+         }
+       },
+       "default_provider": {
+@@ -132,6 +133,14 @@
+           "vllm_max_tokens": "Max Response Length (tokens)",
+           "vllm_temperature": "Temperature (creativity)"
+         }
++      },
++      "facial_recognition": {
++        "title": "Facial Recognition",
++        "description": "Configure facial recognition using the DeepFace addon. Install the Facial Recognition addon from the ha-addons repository first.",
++        "data": {
++          "facial_recognition_enabled": "Enable Facial Recognition",
++          "facial_recognition_url": "Facial Recognition Server URL"
++        }
+       }
+     },
+     "abort": {
+-- 
+2.43.0
+
