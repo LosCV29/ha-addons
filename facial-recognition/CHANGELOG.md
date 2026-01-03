@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.6] - 2026-01-03
+
+### Fixed
+- Changed `homeassistant_config` mapping from read-only to read-write so addon can create faces directory
+- Fixed README.md to show correct faces directory path (`/homeassistant/camera_faces/` not `/share/faces/`)
+
 ## [1.0.5] - 2026-01-03
 
 ### Fixed

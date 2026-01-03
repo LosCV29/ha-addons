@@ -26,7 +26,7 @@ DeepFace-based facial recognition server that runs locally on your Home Assistan
 
 2. Find "Facial Recognition" in the add-on store and click Install
 
-3. Add photos to `/share/faces/PersonName/` folders
+3. Add photos to `/homeassistant/camera_faces/PersonName/` folders (accessible via Samba at `\\homeassistant\config\camera_faces\`)
 
 4. Start the add-on
 

@@ -1,6 +1,6 @@
 name: "Facial Recognition"
 description: "DeepFace facial recognition server for HA Video Vision"
-version: "1.0.5"
+version: "1.0.6"
 slug: "facial_recognition"
 init: false
 arch:
@@ -16,7 +16,7 @@ ports_description:
   8100/tcp: "Facial Recognition API"
 map:
   - share:rw
-  - homeassistant_config:ro
+  - homeassistant_config:rw
 options:
   distance_threshold: 0.45
   min_face_confidence: 0.80
