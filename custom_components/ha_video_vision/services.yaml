@@ -1,0 +1,79 @@
+analyze_camera:
+  name: Analyze Camera
+  description: Record video from camera and analyze with AI vision. Optionally identifies people using facial recognition.
+  fields:
+    camera:
+      name: Camera
+      description: Camera name, entity ID, or voice alias
+      required: true
+      example: "front door"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Video recording duration in seconds (1-10)
+      required: false
+      default: 3
+      example: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+    user_query:
+      name: Custom Query
+      description: Optional custom prompt for the AI analysis
+      required: false
+      example: "Is there anyone at the door?"
+      selector:
+        text:
+
+record_clip:
+  name: Record Clip
+  description: Record a video clip from camera without analysis
+  fields:
+    camera:
+      name: Camera
+      description: Camera name, entity ID, or voice alias
+      required: true
+      example: "backyard"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Video recording duration in seconds (1-10)
+      required: false
+      default: 3
+      example: 5
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+
+identify_faces:
+  name: Identify Faces
+  description: Identify faces in an image using DeepFace facial recognition
+  fields:
+    camera:
+      name: Camera
+      description: Camera name, entity ID, or voice alias to capture snapshot from
+      required: false
+      example: "front door"
+      selector:
+        text:
+    image_path:
+      name: Image Path
+      description: Path to an image file on the file system
+      required: false
+      example: "/media/snapshot.jpg"
+      selector:
+        text:
+    image_base64:
+      name: Image Base64
+      description: Base64-encoded image data
+      required: false
+      selector:
+        text:

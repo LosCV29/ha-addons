@@ -1,0 +1,11 @@
+{
+  "domain": "ha_video_vision",
+  "name": "HA Video Vision",
+  "codeowners": ["@LosCV29"],
+  "config_flow": true,
+  "documentation": "https://github.com/LosCV29/ha-video-vision",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/LosCV29/ha-video-vision/issues",
+  "requirements": ["aiofiles>=23.0.0"],
+  "version": "2.0.0"
+}

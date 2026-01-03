@@ -1,0 +1,161 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select AI Provider",
+        "description": "Choose your AI provider for video analysis",
+        "data": {
+          "provider": "AI Provider"
+        }
+      },
+      "credentials": {
+        "title": "Provider Credentials",
+        "description": "Enter credentials for {provider_name}",
+        "data": {
+          "api_key": "API Key",
+          "vllm_url": "Server URL"
+        }
+      },
+      "select_model": {
+        "title": "Select Model",
+        "description": "Found {model_count} video-capable models for {provider_name}",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "deepface": {
+        "title": "Facial Recognition (Optional)",
+        "description": "Configure DeepFace facial recognition server to identify people in camera feeds.",
+        "data": {
+          "deepface_enabled": "Enable Facial Recognition",
+          "deepface_url": "DeepFace Server URL",
+          "deepface_tolerance": "Recognition Tolerance (lower = stricter)"
+        }
+      },
+      "cameras": {
+        "title": "Select Cameras",
+        "description": "Found {camera_count} cameras. {camera_hint}",
+        "data": {
+          "selected_cameras": "Cameras"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the provider. Check your credentials.",
+      "deepface_connection_failed": "Could not connect to DeepFace server. Make sure it's running and accessible."
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of HA Video Vision is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Video Vision Options",
+        "menu_options": {
+          "default_provider": "Select Default Provider",
+          "configure_google": "Configure Google Gemini",
+          "configure_openrouter": "Configure OpenRouter",
+          "configure_local": "Configure Local vLLM",
+          "deepface": "Configure Facial Recognition",
+          "cameras": "Select Cameras",
+          "voice_aliases": "Voice Aliases",
+          "video_quality": "Video Quality",
+          "ai_settings": "AI Settings"
+        }
+      },
+      "deepface": {
+        "title": "Facial Recognition",
+        "description": "{deepface_hint}",
+        "data": {
+          "deepface_enabled": "Enable Facial Recognition",
+          "deepface_url": "DeepFace Server URL",
+          "deepface_tolerance": "Recognition Tolerance"
+        }
+      },
+      "default_provider": {
+        "title": "Default Provider",
+        "description": "Select which provider to use by default",
+        "data": {
+          "default_provider": "Default Provider"
+        }
+      },
+      "configure_google": {
+        "title": "Configure Google Gemini",
+        "description": "Enter your Google AI Studio API key",
+        "data": {
+          "api_key": "API Key"
+        }
+      },
+      "google_model": {
+        "title": "Select Gemini Model",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "configure_openrouter": {
+        "title": "Configure OpenRouter",
+        "description": "Enter your OpenRouter API key",
+        "data": {
+          "api_key": "API Key"
+        }
+      },
+      "openrouter_model": {
+        "title": "Select OpenRouter Model",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "configure_local": {
+        "title": "Configure Local vLLM",
+        "description": "Enter your local vLLM server URL",
+        "data": {
+          "vllm_url": "Server URL"
+        }
+      },
+      "local_model": {
+        "title": "Select Local Model",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "cameras": {
+        "title": "Select Cameras",
+        "description": "Found {camera_count} cameras",
+        "data": {
+          "selected_cameras": "Cameras"
+        }
+      },
+      "voice_aliases": {
+        "title": "Voice Aliases",
+        "description": "Map voice-friendly names to cameras.\n\nAvailable cameras:\n{camera_list}\n\nFormat (one per line):\n{example}",
+        "data": {
+          "alias_config": "Aliases"
+        }
+      },
+      "video_quality": {
+        "title": "Video Quality",
+        "data": {
+          "video_duration": "Video Duration (seconds)",
+          "video_width": "Video Resolution",
+          "snapshot_dir": "Snapshot Directory",
+          "snapshot_quality": "JPEG Quality (1-100)"
+        }
+      },
+      "ai_settings": {
+        "title": "AI Settings",
+        "data": {
+          "vllm_max_tokens": "Max Tokens",
+          "vllm_temperature": "Temperature"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the provider",
+      "deepface_connection_failed": "Could not connect to DeepFace server"
+    },
+    "abort": {
+      "no_providers_configured": "No providers configured yet. Configure at least one provider first."
+    }
+  }
+}
