@@ -16,7 +16,7 @@ ports_description:
   8100/tcp: "Facial Recognition API"
 map:
   - share:rw
-  - config:rw
+  - homeassistant_config:ro
 options:
   distance_threshold: 0.45
   min_face_confidence: 0.80
