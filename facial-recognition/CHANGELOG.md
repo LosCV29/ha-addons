@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.5] - 2026-01-03
+
+### Fixed
+- Accept both `image` and `image_base64` field names in /identify endpoint for client compatibility
+
 ## [1.0.4] - 2026-01-03
 
 ### Fixed

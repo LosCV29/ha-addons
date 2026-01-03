@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 import uvicorn
 
 # Configure logging
@@ -64,7 +64,7 @@ deepface = None
 # =============================================================================
 
 class IdentifyRequest(BaseModel):
-    image_base64: str
+    image_base64: str = Field(validation_alias=AliasChoices('image_base64', 'image'))
     tolerance: float | None = None
 
 
