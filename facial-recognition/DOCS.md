@@ -91,6 +91,14 @@ Identify faces in an image.
 }
 ```
 
+Note: Both `image_base64` and `image` field names are accepted for compatibility.
+
+```json
+{
+  "image": "base64_encoded_image_data"
+}
+```
+
 ### POST /reload
 Reload faces from disk (use after adding new photos).
 
