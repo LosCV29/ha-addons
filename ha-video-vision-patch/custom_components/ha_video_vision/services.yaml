@@ -1,0 +1,72 @@
+analyze_camera:
+  name: Analyze Camera
+  description: Record video from camera and analyze with AI vision.
+  fields:
+    camera:
+      name: Camera
+      description: Camera name or alias to analyze
+      required: true
+      example: "driveway"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Recording duration in seconds
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+    user_query:
+      name: Prompt
+      description: Custom prompt for the AI analysis
+      required: false
+      example: "Describe what you see. Only state what is visible."
+      selector:
+        text:
+          multiline: true
+
+record_clip:
+  name: Record Clip
+  description: Record a video clip from camera without analysis.
+  fields:
+    camera:
+      name: Camera
+      description: Camera name or alias to record from
+      required: true
+      example: "porch"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Recording duration in seconds
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+
+identify_faces:
+  name: Identify Faces
+  description: Identify faces in an image using the facial recognition addon.
+  fields:
+    camera:
+      name: Camera
+      description: Camera name or alias to get snapshot from
+      required: false
+      example: "front_door"
+      selector:
+        text:
+    image:
+      name: Image
+      description: Base64-encoded image data (alternative to camera)
+      required: false
+      selector:
+        text:
+          multiline: true

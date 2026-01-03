@@ -1,0 +1,193 @@
+blueprint:
+  name: "HA Video Vision - Camera Alert"
+  description: >
+    When person is detected, record video, run AI analysis,
+    and send mobile notifications with snapshot. Works with iOS and Android via Nabu Casa.
+  domain: automation
+  author: "HA Video Vision Integration"
+  source_url: "https://github.com/LosCV29/ha-video-vision/blob/main/custom_components/ha_video_vision/blueprints/automation/camera_alert.yaml"
+
+  input:
+    person_sensor:
+      name: "Person Sensor"
+      description: "Binary sensor that triggers on person detection"
+      selector:
+        entity:
+          domain: binary_sensor
+
+    camera_name:
+      name: "Camera Name"
+      description: "Camera name as configured in HA Video Vision (e.g., 'porch', 'driveway')"
+      selector:
+        text:
+
+    notify_devices:
+      name: "Notify Devices"
+      description: "Select mobile devices to notify (iOS and Android)"
+      default: []
+      selector:
+        device:
+          multiple: true
+          filter:
+            integration: mobile_app
+
+    notify_start:
+      name: "Notify After"
+      description: "Only send notifications after this time (leave default for always)"
+      default: "00:00:00"
+      selector:
+        time:
+
+    notify_end:
+      name: "Notify Before"
+      description: "Only send notifications before this time (leave default for always)"
+      default: "23:59:59"
+      selector:
+        time:
+
+    custom_prompt:
+      name: "Custom Prompt (Optional)"
+      description: "Override the AI prompt. Leave empty for default factual description."
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    cooldown:
+      name: "Cooldown (minutes)"
+      description: "Wait time between notifications for this camera"
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "min"
+      default: 2
+
+    tap_navigate:
+      name: "Tap Navigate"
+      description: "Dashboard to open when notification is tapped"
+      default: "/lovelace/0"
+      selector:
+        text:
+
+    critical_alert:
+      name: "Critical Alert (iOS)"
+      description: "Bypass Do Not Disturb on iOS devices"
+      default: false
+      selector:
+        boolean:
+
+    capture_delay:
+      name: "Capture Delay (seconds)"
+      description: "Wait time before capturing. Increase for cloud cameras (Ring, Nest) that need time to process new video. Default 1s works for local cameras, use 3-5s for cloud cameras."
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          unit_of_measurement: "s"
+
+mode: single
+max_exceeded: silent
+
+variables:
+  notify_devices: !input notify_devices
+  critical: !input critical_alert
+  tap_nav: !input tap_navigate
+  camera_input: !input camera_name
+  user_prompt: !input custom_prompt
+  time_start: !input notify_start
+  time_end: !input notify_end
+  delay_seconds: !input capture_delay
+  # Default prompt - factual and deterministic
+  default_prompt: "Briefly describe what you see. Only state what is clearly visible. Do not speculate. If a person is visible, describe their appearance and actions. 2-3 sentences max."
+  # Build service names from device IDs
+  device_services: >
+    {% set ns = namespace(services=[]) %}
+    {% for device_id in notify_devices %}
+      {% set device_name = device_attr(device_id, "name") %}
+      {% set service_name = "mobile_app_" + device_name | slugify %}
+      {% set ns.services = ns.services + [service_name] %}
+    {% endfor %}
+    {{ ns.services }}
+
+trigger:
+  - platform: state
+    entity_id: !input person_sensor
+    to: "on"
+
+condition:
+  # Check if current time is within notification window
+  - condition: time
+    after: !input notify_start
+    before: !input notify_end
+
+action:
+  # Wait for camera to capture (increase for cloud cameras like Ring/Nest)
+  - delay:
+      seconds: "{{ delay_seconds }}"
+
+  # Analyze camera with prompt
+  - service: ha_video_vision.analyze_camera
+    data:
+      camera: !input camera_name
+      duration: 3
+      user_query: "{{ user_prompt if user_prompt else default_prompt }}"
+    response_variable: result
+
+  # Send notifications if successful
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ result.success == true }}"
+        sequence:
+          - variables:
+              tag: "ha_video_vision_{{ camera_input }}"
+              notification_title: "{{ result.friendly_name }}"
+              notification_message: "{{ result.description if result.description else 'Motion detected on camera' }}"
+
+          # Send to all devices
+          - repeat:
+              for_each: "{{ device_services }}"
+              sequence:
+                - service: "notify.{{ repeat.item }}"
+                  data:
+                    title: "{{ notification_title }}"
+                    message: "{{ notification_message }}"
+                    data:
+                      # Image - works for both platforms
+                      image: "{{ result.snapshot_url }}"
+                      # Tap actions
+                      url: "{{ tap_nav }}"
+                      clickAction: "{{ tap_nav }}"
+                      # Grouping
+                      tag: "{{ tag }}"
+                      group: "ha_video_vision"
+                      alert_once: true
+                      # Priority
+                      ttl: 0
+                      priority: high
+                      # Android
+                      channel: "ha_video_vision"
+                      sticky: true
+                      # iOS
+                      attachment:
+                        url: "{{ result.snapshot_url }}"
+                        content_type: JPEG
+                      push:
+                        interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
+                        sound:
+                          name: default
+                          critical: "{{ 1 if critical else 0 }}"
+                          volume: "{{ 1.0 if critical else 0.5 }}"
+    default:
+      - service: system_log.write
+        data:
+          message: "HA Video Vision failed for {{ camera_input }}: {{ result.error }}"
+          level: warning
+
+  # Cooldown
+  - delay:
+      minutes: !input cooldown
