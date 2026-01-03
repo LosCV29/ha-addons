@@ -5,16 +5,16 @@ This add-on provides facial recognition capabilities for HA Video Vision using D
 ## Quick Start
 
 1. **Install the add-on** from the repository
-2. **Add photos** to `/share/faces/PersonName/` folders
+2. **Add photos** to `/homeassistant/camera_faces/PersonName/` folders
 3. **Start the add-on**
 4. **Configure HA Video Vision** to use `http://localhost:8100`
 
 ## Adding Faces
 
-Create folders in `/share/faces/` for each person you want to recognize:
+Create folders in your Home Assistant config directory under `camera_faces/` for each person:
 
 ```
-/share/faces/
+/homeassistant/camera_faces/
 ├── John/
 │   ├── photo1.jpg
 │   ├── photo2.jpg
@@ -37,17 +37,17 @@ Create folders in `/share/faces/` for each person you want to recognize:
 ## Accessing the Faces Folder
 
 ### Via Samba (File Share)
-If you have the Samba add-on installed, access `\\homeassistant\share\faces\`
+If you have the Samba add-on installed, access `\\homeassistant\config\camera_faces\`
 
 ### Via SSH
 ```bash
-cd /share/faces
+cd /homeassistant/camera_faces
 mkdir "John"
 # Copy photos to the folder
 ```
 
 ### Via File Editor
-Use the File Editor add-on to navigate to `/share/faces/`
+Use the File Editor add-on to navigate to `/config/camera_faces/`
 
 ## Configuration
 
@@ -106,7 +106,7 @@ Reload faces from disk (use after adding new photos).
 ## Troubleshooting
 
 ### "No known faces loaded"
-- Add photos to `/share/faces/PersonName/` folders
+- Add photos to `/homeassistant/camera_faces/PersonName/` folders
 - Each person needs their own folder
 - Restart the add-on after adding photos
 
