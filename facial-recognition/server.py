@@ -25,18 +25,233 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# MODEL AND DETECTOR INFORMATION
+# =============================================================================
+
+# Recognition models with their characteristics
+# RAM usage is approximate and includes model weights
+MODEL_INFO = {
+    "ArcFace": {
+        "embedding_size": 512,
+        "accuracy": "excellent",
+        "accuracy_score": 99.5,  # LFW benchmark approximate
+        "speed": "medium",
+        "ram_mb": 1500,
+        "description": "State-of-the-art accuracy, recommended for high-end hardware"
+    },
+    "Facenet512": {
+        "embedding_size": 512,
+        "accuracy": "excellent",
+        "accuracy_score": 99.4,
+        "speed": "medium",
+        "ram_mb": 1200,
+        "description": "Excellent accuracy with good efficiency"
+    },
+    "VGG-Face": {
+        "embedding_size": 2622,
+        "accuracy": "very_good",
+        "accuracy_score": 98.9,
+        "speed": "slow",
+        "ram_mb": 2500,
+        "description": "Large model, high accuracy but resource intensive"
+    },
+    "Facenet": {
+        "embedding_size": 128,
+        "accuracy": "good",
+        "accuracy_score": 99.2,
+        "speed": "fast",
+        "ram_mb": 500,
+        "description": "Compact model, good for mid-range hardware"
+    },
+    "SFace": {
+        "embedding_size": 128,
+        "accuracy": "good",
+        "accuracy_score": 99.0,
+        "speed": "fastest",
+        "ram_mb": 300,
+        "description": "Lightweight model, ideal for Raspberry Pi and low-power devices"
+    },
+    "Dlib": {
+        "embedding_size": 128,
+        "accuracy": "good",
+        "accuracy_score": 99.1,
+        "speed": "medium",
+        "ram_mb": 600,
+        "description": "Classic reliable model with consistent performance"
+    },
+    "OpenFace": {
+        "embedding_size": 128,
+        "accuracy": "fair",
+        "accuracy_score": 93.8,
+        "speed": "fast",
+        "ram_mb": 400,
+        "description": "Older model, fast but less accurate"
+    },
+    "DeepID": {
+        "embedding_size": 160,
+        "accuracy": "fair",
+        "accuracy_score": 97.5,
+        "speed": "fast",
+        "ram_mb": 350,
+        "description": "Compact older model"
+    }
+}
+
+# Face detector backends with their characteristics
+DETECTOR_INFO = {
+    "retinaface": {
+        "accuracy": "best",
+        "accuracy_score": 95,
+        "speed": "slow",
+        "ram_mb": 500,
+        "description": "Best face detection accuracy, handles angles well"
+    },
+    "mtcnn": {
+        "accuracy": "better",
+        "accuracy_score": 90,
+        "speed": "medium",
+        "ram_mb": 200,
+        "description": "Good balance of accuracy and speed"
+    },
+    "ssd": {
+        "accuracy": "good",
+        "accuracy_score": 85,
+        "speed": "fast",
+        "ram_mb": 150,
+        "description": "Fast detection, good for real-time"
+    },
+    "mediapipe": {
+        "accuracy": "good",
+        "accuracy_score": 85,
+        "speed": "fast",
+        "ram_mb": 100,
+        "description": "Google's lightweight detector, efficient"
+    },
+    "opencv": {
+        "accuracy": "basic",
+        "accuracy_score": 70,
+        "speed": "fastest",
+        "ram_mb": 50,
+        "description": "Haar cascade, fastest but least accurate"
+    },
+    "yolov8": {
+        "accuracy": "good",
+        "accuracy_score": 88,
+        "speed": "fast",
+        "ram_mb": 300,
+        "description": "Modern object detection, requires ultralytics"
+    }
+}
+
+# Hardware presets - model + detector combinations
+HARDWARE_PRESETS = {
+    "lightweight": {
+        "model_name": "SFace",
+        "detector_backend": "mediapipe",
+        "description": "Raspberry Pi / Low-power devices (~400MB RAM)",
+        "estimated_ram_mb": 400
+    },
+    "balanced": {
+        "model_name": "Facenet512",
+        "detector_backend": "ssd",
+        "description": "Mid-range hardware (~1.4GB RAM)",
+        "estimated_ram_mb": 1350
+    },
+    "accuracy": {
+        "model_name": "ArcFace",
+        "detector_backend": "retinaface",
+        "description": "High-end hardware, maximum accuracy (~2GB RAM)",
+        "estimated_ram_mb": 2000
+    }
+}
+
+
+def get_available_ram_mb() -> int:
+    """Get available system RAM in MB."""
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    # Value is in kB
+                    kb = int(line.split()[1])
+                    return kb // 1024
+    except Exception:
+        pass
+    return 0
+
+
+def get_total_ram_mb() -> int:
+    """Get total system RAM in MB."""
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    kb = int(line.split()[1])
+                    return kb // 1024
+    except Exception:
+        pass
+    return 0
+
+
+def resolve_hardware_preset(preset: str, manual_model: str, manual_detector: str) -> tuple[str, str, str]:
+    """Resolve hardware preset to actual model and detector.
+
+    Args:
+        preset: The hardware preset (auto, lightweight, balanced, accuracy, custom)
+        manual_model: User-specified model (used if preset is custom)
+        manual_detector: User-specified detector (used if preset is custom)
+
+    Returns:
+        Tuple of (model_name, detector_backend, preset_used)
+    """
+    if preset == "custom":
+        return manual_model, manual_detector, "custom"
+
+    if preset == "auto":
+        # Auto-select based on available RAM
+        total_ram = get_total_ram_mb()
+        logger.info(f"Auto-detecting hardware: {total_ram}MB total RAM")
+
+        if total_ram < 2000:  # Less than 2GB
+            preset = "lightweight"
+            logger.info("Auto-selected: lightweight preset (low RAM detected)")
+        elif total_ram < 4000:  # 2-4GB
+            preset = "balanced"
+            logger.info("Auto-selected: balanced preset (mid-range RAM detected)")
+        else:  # 4GB+
+            preset = "accuracy"
+            logger.info("Auto-selected: accuracy preset (high RAM detected)")
+
+    if preset in HARDWARE_PRESETS:
+        config = HARDWARE_PRESETS[preset]
+        return config["model_name"], config["detector_backend"], preset
+
+    # Fallback to balanced
+    logger.warning(f"Unknown preset '{preset}', falling back to balanced")
+    config = HARDWARE_PRESETS["balanced"]
+    return config["model_name"], config["detector_backend"], "balanced"
+
+# =============================================================================
 # CONFIGURATION - From environment variables (set by run.sh from add-on config)
 # =============================================================================
 
 FACES_DIR = os.environ.get("FACES_DIR", "/share/faces")
 DISTANCE_THRESHOLD = float(os.environ.get("DISTANCE_THRESHOLD", "0.45"))
-MODEL_NAME = os.environ.get("MODEL_NAME", "Facenet512")
-DETECTOR_BACKEND = os.environ.get("DETECTOR_BACKEND", "retinaface")
 MIN_FACE_CONFIDENCE = float(os.environ.get("MIN_FACE_CONFIDENCE", "0.80"))
 MIN_FACE_SIZE = int(os.environ.get("MIN_FACE_SIZE", "40"))
 MAX_CONSIDERATION_DISTANCE = float(os.environ.get("MAX_CONSIDERATION_DISTANCE", "0.60"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8100"))
+
+# Hardware preset handling
+HARDWARE_PRESET = os.environ.get("HARDWARE_PRESET", "balanced")
+_MANUAL_MODEL = os.environ.get("MODEL_NAME", "Facenet512")
+_MANUAL_DETECTOR = os.environ.get("DETECTOR_BACKEND", "retinaface")
+
+# Resolve the actual model and detector based on preset
+MODEL_NAME, DETECTOR_BACKEND, ACTIVE_PRESET = resolve_hardware_preset(
+    HARDWARE_PRESET, _MANUAL_MODEL, _MANUAL_DETECTOR
+)
 
 # Embedding cache configuration
 EMBEDDINGS_CACHE_FILE = os.path.join(FACES_DIR, ".embeddings_cache.json")
@@ -90,6 +305,15 @@ class StatusResponse(BaseModel):
     detector: str
     min_confidence: float
     min_face_size: int
+    # New fields for model/detector info
+    hardware_preset: str
+    model_info: dict[str, Any]
+    detector_info: dict[str, Any]
+    system_ram_mb: int
+    available_ram_mb: int
+    estimated_usage_mb: int
+    available_models: list[str]
+    available_detectors: list[str]
 
 
 # =============================================================================
@@ -537,14 +761,41 @@ def identify_faces_in_image(image_bytes: bytes, threshold: float) -> dict[str, A
 async def startup_event():
     """Load known faces on startup."""
     global known_faces
+
+    # Get system info
+    total_ram = get_total_ram_mb()
+    available_ram = get_available_ram_mb()
+    model_info = MODEL_INFO.get(MODEL_NAME, {})
+    detector_info = DETECTOR_INFO.get(DETECTOR_BACKEND, {})
+    estimated_ram = model_info.get("ram_mb", 0) + detector_info.get("ram_mb", 0)
+
     logger.info("=" * 60)
     logger.info("Facial Recognition Add-on Starting")
-    logger.info(f"Faces directory: {FACES_DIR}")
-    logger.info(f"Model: {MODEL_NAME}")
-    logger.info(f"Distance threshold: {DISTANCE_THRESHOLD}")
-    logger.info(f"Detector: {DETECTOR_BACKEND}")
-    logger.info(f"Min face confidence: {MIN_FACE_CONFIDENCE}")
-    logger.info(f"Min face size: {MIN_FACE_SIZE}px")
+    logger.info("=" * 60)
+    logger.info("")
+    logger.info("SYSTEM INFO:")
+    logger.info(f"  Total RAM: {total_ram}MB")
+    logger.info(f"  Available RAM: {available_ram}MB")
+    logger.info("")
+    logger.info("CONFIGURATION:")
+    logger.info(f"  Hardware preset: {ACTIVE_PRESET}")
+    logger.info(f"  Faces directory: {FACES_DIR}")
+    logger.info("")
+    logger.info("MODEL SETTINGS:")
+    logger.info(f"  Recognition model: {MODEL_NAME}")
+    logger.info(f"    - Accuracy: {model_info.get('accuracy', 'unknown')} ({model_info.get('accuracy_score', 'N/A')}% LFW)")
+    logger.info(f"    - Speed: {model_info.get('speed', 'unknown')}")
+    logger.info(f"    - RAM: ~{model_info.get('ram_mb', 'N/A')}MB")
+    logger.info(f"  Face detector: {DETECTOR_BACKEND}")
+    logger.info(f"    - Accuracy: {detector_info.get('accuracy', 'unknown')}")
+    logger.info(f"    - Speed: {detector_info.get('speed', 'unknown')}")
+    logger.info(f"    - RAM: ~{detector_info.get('ram_mb', 'N/A')}MB")
+    logger.info(f"  Estimated total RAM usage: ~{estimated_ram}MB")
+    logger.info("")
+    logger.info("THRESHOLDS:")
+    logger.info(f"  Distance threshold: {DISTANCE_THRESHOLD}")
+    logger.info(f"  Min face confidence: {MIN_FACE_CONFIDENCE}")
+    logger.info(f"  Min face size: {MIN_FACE_SIZE}px")
     logger.info("=" * 60)
     known_faces = load_known_faces()
     if not known_faces:
@@ -563,7 +814,12 @@ async def startup_event():
 @app.get("/", response_model=StatusResponse)
 @app.get("/status", response_model=StatusResponse)
 async def status():
-    """Get server status."""
+    """Get server status and configuration info."""
+    # Calculate estimated RAM usage
+    model_ram = MODEL_INFO.get(MODEL_NAME, {}).get("ram_mb", 0)
+    detector_ram = DETECTOR_INFO.get(DETECTOR_BACKEND, {}).get("ram_mb", 0)
+    estimated_usage = model_ram + detector_ram
+
     return StatusResponse(
         status="running",
         known_people=list(known_faces.keys()),
@@ -573,8 +829,36 @@ async def status():
         threshold=DISTANCE_THRESHOLD,
         detector=DETECTOR_BACKEND,
         min_confidence=MIN_FACE_CONFIDENCE,
-        min_face_size=MIN_FACE_SIZE
+        min_face_size=MIN_FACE_SIZE,
+        # New fields
+        hardware_preset=ACTIVE_PRESET,
+        model_info=MODEL_INFO.get(MODEL_NAME, {}),
+        detector_info=DETECTOR_INFO.get(DETECTOR_BACKEND, {}),
+        system_ram_mb=get_total_ram_mb(),
+        available_ram_mb=get_available_ram_mb(),
+        estimated_usage_mb=estimated_usage,
+        available_models=list(MODEL_INFO.keys()),
+        available_detectors=list(DETECTOR_INFO.keys())
     )
+
+
+@app.get("/models")
+async def list_models():
+    """List all available recognition models with their characteristics."""
+    return {
+        "models": MODEL_INFO,
+        "current_model": MODEL_NAME,
+        "presets": HARDWARE_PRESETS
+    }
+
+
+@app.get("/detectors")
+async def list_detectors():
+    """List all available face detector backends with their characteristics."""
+    return {
+        "detectors": DETECTOR_INFO,
+        "current_detector": DETECTOR_BACKEND
+    }
 
 
 @app.post("/identify", response_model=IdentifyResponse)

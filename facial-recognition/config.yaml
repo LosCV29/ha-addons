@@ -1,6 +1,6 @@
 name: "Facial Recognition"
 description: "DeepFace facial recognition server for HA Video Vision"
-version: "1.0.7"
+version: "1.1.0"
 slug: "facial_recognition"
 init: false
 arch:
@@ -18,14 +18,45 @@ map:
   - share:rw
   - homeassistant_config:ro
 options:
+  # Hardware preset - overrides model and detector if set
+  # auto: Select best settings for your hardware automatically
+  # lightweight: Fast, low RAM (~300MB) - good for Raspberry Pi
+  # balanced: Good balance of speed and accuracy (~1GB RAM)
+  # accuracy: Best accuracy, higher resources (~1.5GB+ RAM)
+  # custom: Use manual model_name and detector_backend settings
+  hardware_preset: "balanced"
+
+  # Manual model selection (only used when hardware_preset is "custom")
+  # Models ordered by accuracy (best to worst):
+  # - ArcFace: State-of-the-art accuracy, ~1.5GB RAM, medium speed
+  # - Facenet512: Excellent accuracy, ~1.2GB RAM, medium speed
+  # - VGG-Face: Very good accuracy, ~2.5GB RAM, slower
+  # - Facenet: Good accuracy, ~500MB RAM, fast
+  # - SFace: Good accuracy, ~300MB RAM, fastest
+  # - Dlib: Good accuracy, ~600MB RAM, medium speed
+  # - OpenFace: Fair accuracy, ~400MB RAM, fast
+  # - DeepID: Fair accuracy, ~350MB RAM, fast
+  model_name: "Facenet512"
+
+  # Face detector backend (only used when hardware_preset is "custom")
+  # Detectors ordered by accuracy (best to worst):
+  # - retinaface: Best accuracy, slower, ~500MB extra RAM
+  # - mtcnn: Better accuracy, medium speed, ~200MB extra RAM
+  # - ssd: Good accuracy, fast, ~150MB extra RAM
+  # - mediapipe: Good accuracy, fast, ~100MB extra RAM
+  # - opencv: Basic accuracy, fastest, minimal extra RAM
+  # - yolov8: Good accuracy, fast, ~300MB extra RAM (requires ultralytics)
+  detector_backend: "retinaface"
+
+  # Recognition thresholds
   distance_threshold: 0.45
   min_face_confidence: 0.80
   min_face_size: 40
-  model_name: "Facenet512"
-  detector_backend: "retinaface"
+
 schema:
+  hardware_preset: list(auto|lightweight|balanced|accuracy|custom)
+  model_name: list(ArcFace|Facenet512|VGG-Face|Facenet|SFace|Dlib|OpenFace|DeepID)
+  detector_backend: list(retinaface|mtcnn|ssd|mediapipe|opencv|yolov8)
   distance_threshold: float
   min_face_confidence: float
   min_face_size: int
-  model_name: str
-  detector_backend: str
