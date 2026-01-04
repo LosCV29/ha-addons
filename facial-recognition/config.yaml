@@ -1,6 +1,6 @@
 name: "Facial Recognition"
 description: "DeepFace facial recognition server for HA Video Vision"
-version: "1.0.5"
+version: "1.0.6"
 slug: "facial_recognition"
 init: false
 arch:
@@ -9,7 +9,7 @@ arch:
   - armv7
 startup: application
 boot: auto
-host_network: false
+host_network: true
 ports:
   8100/tcp: 8100
 ports_description:
