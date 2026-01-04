@@ -5,6 +5,7 @@ DeepFace-based face detection and recognition
 
 import base64
 import io
+import json
 import logging
 import os
 from pathlib import Path
@@ -36,6 +37,9 @@ MIN_FACE_SIZE = int(os.environ.get("MIN_FACE_SIZE", "40"))
 MAX_CONSIDERATION_DISTANCE = float(os.environ.get("MAX_CONSIDERATION_DISTANCE", "0.60"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8100"))
+
+# Embedding cache configuration
+EMBEDDINGS_CACHE_FILE = os.path.join(FACES_DIR, ".embeddings_cache.json")
 
 # =============================================================================
 # GLOBALS
@@ -105,8 +109,157 @@ def cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
     return 1 - similarity
 
 
-def load_known_faces() -> dict[str, list[np.ndarray]]:
-    """Load all reference faces from the faces directory."""
+# =============================================================================
+# EMBEDDING CACHE FUNCTIONS
+# =============================================================================
+
+def get_image_files_info(faces_path: Path) -> dict[str, dict[str, float]]:
+    """Get all image files and their modification timestamps.
+
+    Returns:
+        Dict mapping person_name -> {image_filename: mtime}
+    """
+    image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+    files_info = {}
+
+    if not faces_path.exists():
+        return files_info
+
+    for person_dir in faces_path.iterdir():
+        if not person_dir.is_dir():
+            continue
+
+        person_name = person_dir.name
+        files_info[person_name] = {}
+
+        for image_file in person_dir.iterdir():
+            if image_file.suffix.lower() not in image_extensions:
+                continue
+            files_info[person_name][image_file.name] = image_file.stat().st_mtime
+
+    return files_info
+
+
+def save_embeddings_cache(
+    faces: dict[str, list[np.ndarray]],
+    files_info: dict[str, dict[str, float]],
+    embeddings_by_file: dict[str, dict[str, list[float]]]
+) -> None:
+    """Save embeddings cache to disk.
+
+    Args:
+        faces: Dict mapping person_name -> list of numpy arrays
+        files_info: Dict mapping person_name -> {filename: mtime}
+        embeddings_by_file: Dict mapping person_name -> {filename: embedding_list}
+    """
+    cache_data = {
+        "model_name": MODEL_NAME,
+        "detector_backend": DETECTOR_BACKEND,
+        "files_info": files_info,
+        "embeddings": embeddings_by_file
+    }
+
+    try:
+        cache_path = Path(EMBEDDINGS_CACHE_FILE)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(cache_path, "w") as f:
+            json.dump(cache_data, f)
+
+        logger.info(f"Saved embeddings cache to {EMBEDDINGS_CACHE_FILE}")
+    except Exception as e:
+        logger.warning(f"Failed to save embeddings cache: {e}")
+
+
+def load_embeddings_cache() -> tuple[dict[str, list[np.ndarray]], dict[str, dict[str, list[float]]], set[tuple[str, str]]] | None:
+    """Load embeddings from cache if valid.
+
+    Returns:
+        Tuple of (faces_dict, embeddings_by_file, files_to_skip) if cache is valid,
+        None if cache is invalid or doesn't exist.
+        files_to_skip contains (person_name, filename) tuples for files that are cached.
+    """
+    cache_path = Path(EMBEDDINGS_CACHE_FILE)
+
+    if not cache_path.exists():
+        logger.info("No embeddings cache found")
+        return None
+
+    try:
+        with open(cache_path, "r") as f:
+            cache_data = json.load(f)
+
+        # Validate model and detector match
+        if cache_data.get("model_name") != MODEL_NAME:
+            logger.info(f"Cache model mismatch: {cache_data.get('model_name')} != {MODEL_NAME}")
+            return None
+
+        if cache_data.get("detector_backend") != DETECTOR_BACKEND:
+            logger.info(f"Cache detector mismatch: {cache_data.get('detector_backend')} != {DETECTOR_BACKEND}")
+            return None
+
+        cached_files_info = cache_data.get("files_info", {})
+        cached_embeddings = cache_data.get("embeddings", {})
+
+        # Get current files info
+        faces_path = Path(FACES_DIR)
+        current_files_info = get_image_files_info(faces_path)
+
+        # Build faces dict from cache, tracking which files are still valid
+        faces = {}
+        valid_embeddings_by_file = {}
+        files_to_skip = set()
+
+        for person_name, person_embeddings in cached_embeddings.items():
+            # Check if person still exists
+            if person_name not in current_files_info:
+                logger.info(f"Person {person_name} removed, skipping cached embeddings")
+                continue
+
+            current_person_files = current_files_info[person_name]
+            cached_person_files = cached_files_info.get(person_name, {})
+
+            valid_embeddings = []
+            valid_embeddings_files = {}
+
+            for filename, embedding in person_embeddings.items():
+                # Check if file still exists with same timestamp
+                if filename not in current_person_files:
+                    logger.info(f"File {filename} for {person_name} removed")
+                    continue
+
+                current_mtime = current_person_files[filename]
+                cached_mtime = cached_person_files.get(filename)
+
+                if cached_mtime is None or abs(current_mtime - cached_mtime) > 1:
+                    logger.info(f"File {filename} for {person_name} modified, will regenerate")
+                    continue
+
+                # Cache entry is valid
+                valid_embeddings.append(np.array(embedding))
+                valid_embeddings_files[filename] = embedding
+                files_to_skip.add((person_name, filename))
+
+            if valid_embeddings:
+                faces[person_name] = valid_embeddings
+                valid_embeddings_by_file[person_name] = valid_embeddings_files
+
+        logger.info(f"Loaded {sum(len(e) for e in faces.values())} embeddings from cache for {len(faces)} people")
+        return faces, valid_embeddings_by_file, files_to_skip
+
+    except Exception as e:
+        logger.warning(f"Failed to load embeddings cache: {e}")
+        return None
+
+
+def load_known_faces(force_reload: bool = False) -> dict[str, list[np.ndarray]]:
+    """Load all reference faces from the faces directory.
+
+    Uses caching to avoid regenerating embeddings for unchanged images.
+
+    Args:
+        force_reload: If True, ignore cache and regenerate all embeddings.
+    """
     global deepface
 
     try:
@@ -117,7 +270,6 @@ def load_known_faces() -> dict[str, list[np.ndarray]]:
         logger.error(f"DeepFace not installed: {e}")
         return {}
 
-    faces = {}
     faces_path = Path(FACES_DIR)
 
     if not faces_path.exists():
@@ -127,17 +279,43 @@ def load_known_faces() -> dict[str, list[np.ndarray]]:
         logger.info(f"Add photos to {FACES_DIR}/PersonName/ folders")
         return {}
 
+    # Try to load from cache first
+    faces = {}
+    embeddings_by_file = {}
+    files_to_skip = set()
+
+    if not force_reload:
+        cache_result = load_embeddings_cache()
+        if cache_result:
+            faces, embeddings_by_file, files_to_skip = cache_result
+            if files_to_skip:
+                logger.info(f"Using {len(files_to_skip)} cached embeddings")
+
+    # Get current files info for saving cache later
+    current_files_info = get_image_files_info(faces_path)
+
     image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+    new_embeddings_generated = False
 
     for person_dir in faces_path.iterdir():
         if not person_dir.is_dir():
             continue
 
         person_name = person_dir.name
-        embeddings = []
+
+        # Initialize if person is new
+        if person_name not in faces:
+            faces[person_name] = []
+        if person_name not in embeddings_by_file:
+            embeddings_by_file[person_name] = {}
 
         for image_file in person_dir.iterdir():
             if image_file.suffix.lower() not in image_extensions:
+                continue
+
+            # Skip if already loaded from cache
+            if (person_name, image_file.name) in files_to_skip:
+                logger.info(f"  ✓ Using cached embedding for {image_file.name} ({person_name})")
                 continue
 
             try:
@@ -152,7 +330,9 @@ def load_known_faces() -> dict[str, list[np.ndarray]]:
 
                 if result and len(result) > 0:
                     embedding = np.array(result[0]["embedding"])
-                    embeddings.append(embedding)
+                    faces[person_name].append(embedding)
+                    embeddings_by_file[person_name][image_file.name] = embedding.tolist()
+                    new_embeddings_generated = True
                     logger.info(f"  ✓ Loaded embedding from {image_file.name}")
                 else:
                     logger.warning(f"  ✗ No face found in {image_file.name}")
@@ -160,11 +340,20 @@ def load_known_faces() -> dict[str, list[np.ndarray]]:
             except Exception as e:
                 logger.warning(f"  ✗ Error loading {image_file}: {e}")
 
-        if embeddings:
-            faces[person_name] = embeddings
-            logger.info(f"Loaded {len(embeddings)} embeddings for {person_name}")
+    # Remove people with no embeddings
+    faces = {k: v for k, v in faces.items() if v}
+    embeddings_by_file = {k: v for k, v in embeddings_by_file.items() if v}
+
+    # Log summary for each person
+    for person_name, person_embeddings in faces.items():
+        logger.info(f"Loaded {len(person_embeddings)} embeddings for {person_name}")
 
     logger.info(f"Total: {len(faces)} people loaded")
+
+    # Save updated cache if new embeddings were generated
+    if new_embeddings_generated or force_reload:
+        save_embeddings_cache(faces, current_files_info, embeddings_by_file)
+
     return faces
 
 
@@ -402,15 +591,23 @@ async def identify_base64(request: IdentifyRequest):
 
 
 @app.post("/reload")
-async def reload_faces():
-    """Reload reference faces from disk."""
+async def reload_faces(force: bool = False):
+    """Reload reference faces from disk.
+
+    Args:
+        force: If True, ignore cache and regenerate all embeddings.
+    """
     global known_faces
-    logger.info("Reloading known faces...")
-    known_faces = load_known_faces()
+    if force:
+        logger.info("Force reloading known faces (ignoring cache)...")
+    else:
+        logger.info("Reloading known faces...")
+    known_faces = load_known_faces(force_reload=force)
     return {
         "success": True,
         "known_people": list(known_faces.keys()),
-        "total_embeddings": sum(len(e) for e in known_faces.values())
+        "total_embeddings": sum(len(e) for e in known_faces.values()),
+        "cache_cleared": force
     }
 
 
