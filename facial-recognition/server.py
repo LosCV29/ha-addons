@@ -31,10 +31,18 @@ logger = logging.getLogger(__name__)
 # Recognition models with their characteristics
 # RAM usage is approximate and includes model weights
 MODEL_INFO = {
+    "GhostFaceNet": {
+        "embedding_size": 512,
+        "accuracy": "excellent",
+        "accuracy_score": 99.6,  # LFW benchmark approximate
+        "speed": "medium",
+        "ram_mb": 1800,
+        "description": "Newest model with excellent accuracy, efficient architecture"
+    },
     "ArcFace": {
         "embedding_size": 512,
         "accuracy": "excellent",
-        "accuracy_score": 99.5,  # LFW benchmark approximate
+        "accuracy_score": 99.5,
         "speed": "medium",
         "ram_mb": 1500,
         "description": "State-of-the-art accuracy, recommended for high-end hardware"
@@ -149,21 +157,42 @@ HARDWARE_PRESETS = {
         "model_name": "SFace",
         "detector_backend": "mediapipe",
         "description": "Raspberry Pi / Low-power devices (~400MB RAM)",
-        "estimated_ram_mb": 400
+        "estimated_ram_mb": 400,
+        "ensemble": False
     },
     "balanced": {
         "model_name": "Facenet512",
         "detector_backend": "ssd",
         "description": "Mid-range hardware (~1.4GB RAM)",
-        "estimated_ram_mb": 1350
+        "estimated_ram_mb": 1350,
+        "ensemble": False
     },
     "accuracy": {
         "model_name": "ArcFace",
         "detector_backend": "retinaface",
         "description": "High-end hardware, maximum accuracy (~2GB RAM)",
-        "estimated_ram_mb": 2000
+        "estimated_ram_mb": 2000,
+        "ensemble": False
+    },
+    "ultra": {
+        "model_name": "GhostFaceNet",
+        "detector_backend": "retinaface",
+        "description": "Maximum single-model accuracy (~2.3GB RAM)",
+        "estimated_ram_mb": 2300,
+        "ensemble": False
+    },
+    "ensemble": {
+        "model_name": "ArcFace",  # Primary model for single-model fallback
+        "detector_backend": "retinaface",
+        "description": "Multi-model voting for highest accuracy (~6GB+ RAM)",
+        "estimated_ram_mb": 6000,
+        "ensemble": True,
+        "ensemble_models": ["ArcFace", "Facenet512", "VGG-Face"]
     }
 }
+
+# Default ensemble models if not specified
+DEFAULT_ENSEMBLE_MODELS = ["ArcFace", "Facenet512", "VGG-Face"]
 
 
 def get_available_ram_mb() -> int:
@@ -193,19 +222,25 @@ def get_total_ram_mb() -> int:
     return 0
 
 
-def resolve_hardware_preset(preset: str, manual_model: str, manual_detector: str) -> tuple[str, str, str]:
+def resolve_hardware_preset(
+    preset: str,
+    manual_model: str,
+    manual_detector: str,
+    manual_ensemble_models: str | None = None
+) -> tuple[str, str, str, bool, list[str]]:
     """Resolve hardware preset to actual model and detector.
 
     Args:
-        preset: The hardware preset (auto, lightweight, balanced, accuracy, custom)
+        preset: The hardware preset (auto, lightweight, balanced, accuracy, ultra, ensemble, custom)
         manual_model: User-specified model (used if preset is custom)
         manual_detector: User-specified detector (used if preset is custom)
+        manual_ensemble_models: Comma-separated list of models for ensemble mode
 
     Returns:
-        Tuple of (model_name, detector_backend, preset_used)
+        Tuple of (model_name, detector_backend, preset_used, is_ensemble, ensemble_models)
     """
     if preset == "custom":
-        return manual_model, manual_detector, "custom"
+        return manual_model, manual_detector, "custom", False, []
 
     if preset == "auto":
         # Auto-select based on available RAM
@@ -218,18 +253,40 @@ def resolve_hardware_preset(preset: str, manual_model: str, manual_detector: str
         elif total_ram < 4000:  # 2-4GB
             preset = "balanced"
             logger.info("Auto-selected: balanced preset (mid-range RAM detected)")
-        else:  # 4GB+
+        elif total_ram < 8000:  # 4-8GB
             preset = "accuracy"
             logger.info("Auto-selected: accuracy preset (high RAM detected)")
+        elif total_ram < 12000:  # 8-12GB
+            preset = "ultra"
+            logger.info("Auto-selected: ultra preset (very high RAM detected)")
+        else:  # 12GB+
+            preset = "ensemble"
+            logger.info("Auto-selected: ensemble preset (massive RAM detected!)")
 
     if preset in HARDWARE_PRESETS:
         config = HARDWARE_PRESETS[preset]
-        return config["model_name"], config["detector_backend"], preset
+        is_ensemble = config.get("ensemble", False)
+
+        # Get ensemble models
+        if is_ensemble:
+            if manual_ensemble_models:
+                # Parse user-specified ensemble models
+                ensemble_models = [m.strip() for m in manual_ensemble_models.split(",")]
+                # Validate models exist
+                ensemble_models = [m for m in ensemble_models if m in MODEL_INFO]
+                if not ensemble_models:
+                    ensemble_models = DEFAULT_ENSEMBLE_MODELS
+            else:
+                ensemble_models = config.get("ensemble_models", DEFAULT_ENSEMBLE_MODELS)
+        else:
+            ensemble_models = []
+
+        return config["model_name"], config["detector_backend"], preset, is_ensemble, ensemble_models
 
     # Fallback to balanced
     logger.warning(f"Unknown preset '{preset}', falling back to balanced")
     config = HARDWARE_PRESETS["balanced"]
-    return config["model_name"], config["detector_backend"], "balanced"
+    return config["model_name"], config["detector_backend"], "balanced", False, []
 
 # =============================================================================
 # CONFIGURATION - From environment variables (set by run.sh from add-on config)
@@ -247,10 +304,11 @@ PORT = int(os.environ.get("PORT", "8100"))
 HARDWARE_PRESET = os.environ.get("HARDWARE_PRESET", "balanced")
 _MANUAL_MODEL = os.environ.get("MODEL_NAME", "Facenet512")
 _MANUAL_DETECTOR = os.environ.get("DETECTOR_BACKEND", "retinaface")
+_MANUAL_ENSEMBLE_MODELS = os.environ.get("ENSEMBLE_MODELS", None)
 
 # Resolve the actual model and detector based on preset
-MODEL_NAME, DETECTOR_BACKEND, ACTIVE_PRESET = resolve_hardware_preset(
-    HARDWARE_PRESET, _MANUAL_MODEL, _MANUAL_DETECTOR
+MODEL_NAME, DETECTOR_BACKEND, ACTIVE_PRESET, ENSEMBLE_MODE, ENSEMBLE_MODELS = resolve_hardware_preset(
+    HARDWARE_PRESET, _MANUAL_MODEL, _MANUAL_DETECTOR, _MANUAL_ENSEMBLE_MODELS
 )
 
 # Embedding cache configuration
@@ -274,7 +332,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Single model mode: {person_name: [embeddings]}
 known_faces: dict[str, list[np.ndarray]] = {}
+
+# Ensemble mode: {model_name: {person_name: [embeddings]}}
+ensemble_faces: dict[str, dict[str, list[np.ndarray]]] = {}
+
 deepface = None
 
 
@@ -314,6 +377,10 @@ class StatusResponse(BaseModel):
     estimated_usage_mb: int
     available_models: list[str]
     available_detectors: list[str]
+    # Ensemble mode info
+    ensemble_mode: bool
+    ensemble_models: list[str]
+    ensemble_embeddings: dict[str, int]  # model_name -> count of embeddings
 
 
 # =============================================================================
@@ -581,6 +648,260 @@ def load_known_faces(force_reload: bool = False) -> dict[str, list[np.ndarray]]:
     return faces
 
 
+def load_ensemble_faces(force_reload: bool = False) -> dict[str, dict[str, list[np.ndarray]]]:
+    """Load faces for all models in ensemble mode.
+
+    Returns:
+        Dict mapping model_name -> {person_name: [embeddings]}
+    """
+    global deepface
+
+    try:
+        from deepface import DeepFace
+        deepface = DeepFace
+    except ImportError as e:
+        logger.error(f"DeepFace not installed: {e}")
+        return {}
+
+    faces_path = Path(FACES_DIR)
+
+    if not faces_path.exists():
+        logger.warning(f"Faces directory does not exist: {FACES_DIR}")
+        faces_path.mkdir(parents=True, exist_ok=True)
+        return {}
+
+    image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+    all_model_faces = {}
+
+    # Load embeddings for each model in the ensemble
+    for model_name in ENSEMBLE_MODELS:
+        logger.info(f"")
+        logger.info(f"Loading embeddings for model: {model_name}")
+        logger.info("-" * 40)
+
+        model_faces = {}
+
+        for person_dir in faces_path.iterdir():
+            if not person_dir.is_dir():
+                continue
+
+            person_name = person_dir.name
+            model_faces[person_name] = []
+
+            for image_file in person_dir.iterdir():
+                if image_file.suffix.lower() not in image_extensions:
+                    continue
+
+                try:
+                    result = deepface.represent(
+                        img_path=str(image_file),
+                        model_name=model_name,
+                        enforce_detection=True,
+                        detector_backend=DETECTOR_BACKEND
+                    )
+
+                    if result and len(result) > 0:
+                        embedding = np.array(result[0]["embedding"])
+                        model_faces[person_name].append(embedding)
+                        logger.info(f"  ✓ {person_name}/{image_file.name}")
+
+                except Exception as e:
+                    logger.warning(f"  ✗ {person_name}/{image_file.name}: {e}")
+
+        # Remove people with no embeddings
+        model_faces = {k: v for k, v in model_faces.items() if v}
+        all_model_faces[model_name] = model_faces
+
+        total = sum(len(e) for e in model_faces.values())
+        logger.info(f"  Total: {total} embeddings for {len(model_faces)} people")
+
+    return all_model_faces
+
+
+def identify_with_ensemble(image_bytes: bytes, threshold: float) -> dict[str, Any]:
+    """Identify faces using ensemble voting across multiple models."""
+    global deepface, ensemble_faces
+
+    if deepface is None:
+        return {
+            "success": False,
+            "faces_detected": 0,
+            "people": [],
+            "summary": "DeepFace not loaded",
+            "error": "DeepFace not initialized"
+        }
+
+    if not ensemble_faces:
+        return {
+            "success": True,
+            "faces_detected": 0,
+            "people": [],
+            "summary": f"No ensemble faces loaded. Add photos to {FACES_DIR}/PersonName/",
+            "error": None
+        }
+
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+            img.save(tmp_path, "JPEG")
+
+        try:
+            # Extract faces first
+            logger.info(f"[ENSEMBLE] Extracting faces with {DETECTOR_BACKEND}...")
+            face_objs = deepface.extract_faces(
+                img_path=tmp_path,
+                detector_backend=DETECTOR_BACKEND,
+                enforce_detection=False,
+                align=True
+            )
+
+            # Filter valid faces
+            valid_faces = []
+            for face_obj in face_objs:
+                confidence = face_obj.get("confidence", 0)
+                facial_area = face_obj.get("facial_area", {})
+                width = facial_area.get("w", 0)
+                height = facial_area.get("h", 0)
+
+                if confidence >= MIN_FACE_CONFIDENCE and width >= MIN_FACE_SIZE and height >= MIN_FACE_SIZE:
+                    valid_faces.append(face_obj)
+
+            if not valid_faces:
+                return {
+                    "success": True,
+                    "faces_detected": 0,
+                    "people": [],
+                    "summary": "No faces detected"
+                }
+
+            # For each detected face, get votes from all models
+            identified = []
+
+            for face_idx in range(len(valid_faces)):
+                votes = {}  # person_name -> list of (distance, model_name)
+
+                for model_name in ENSEMBLE_MODELS:
+                    if model_name not in ensemble_faces:
+                        continue
+
+                    model_known_faces = ensemble_faces[model_name]
+
+                    try:
+                        # Get embedding for this model
+                        results = deepface.represent(
+                            img_path=tmp_path,
+                            model_name=model_name,
+                            enforce_detection=False,
+                            detector_backend=DETECTOR_BACKEND
+                        )
+
+                        if not results or face_idx >= len(results):
+                            continue
+
+                        embedding = np.array(results[face_idx]["embedding"])
+
+                        # Find best match for this model
+                        best_match = None
+                        best_distance = float("inf")
+
+                        for person_name, known_embeddings in model_known_faces.items():
+                            for known_emb in known_embeddings:
+                                distance = cosine_distance(embedding, known_emb)
+                                if distance < best_distance:
+                                    best_distance = distance
+                                    best_match = person_name
+
+                        if best_match and best_distance <= threshold:
+                            if best_match not in votes:
+                                votes[best_match] = []
+                            votes[best_match].append((best_distance, model_name))
+                            logger.info(f"  [ENSEMBLE] {model_name} votes: {best_match} (d={best_distance:.3f})")
+
+                    except Exception as e:
+                        logger.warning(f"  [ENSEMBLE] {model_name} error: {e}")
+
+                # Determine winner by vote count, then by average distance
+                if votes:
+                    # Sort by: number of votes (desc), then average distance (asc)
+                    vote_scores = []
+                    for person_name, model_votes in votes.items():
+                        num_votes = len(model_votes)
+                        avg_distance = sum(d for d, _ in model_votes) / num_votes
+                        vote_scores.append((person_name, num_votes, avg_distance, model_votes))
+
+                    vote_scores.sort(key=lambda x: (-x[1], x[2]))  # More votes better, lower distance better
+                    winner = vote_scores[0]
+
+                    person_name = winner[0]
+                    num_votes = winner[1]
+                    avg_distance = winner[2]
+                    voting_models = [m for _, m in winner[3]]
+
+                    confidence = round((1 - avg_distance) * 100, 1)
+
+                    identified.append({
+                        "name": person_name,
+                        "confidence": confidence,
+                        "distance": round(avg_distance, 3),
+                        "status": "identified",
+                        "votes": num_votes,
+                        "total_models": len(ENSEMBLE_MODELS),
+                        "voting_models": voting_models
+                    })
+                    logger.info(f"  [ENSEMBLE] Winner: {person_name} ({num_votes}/{len(ENSEMBLE_MODELS)} votes, {confidence}%)")
+                else:
+                    identified.append({
+                        "name": "Unknown",
+                        "confidence": 0,
+                        "distance": None,
+                        "status": "unknown",
+                        "votes": 0,
+                        "total_models": len(ENSEMBLE_MODELS),
+                        "voting_models": []
+                    })
+
+        finally:
+            os.unlink(tmp_path)
+
+        # Build summary
+        names = [p["name"] for p in identified]
+        known_names = [n for n in names if n != "Unknown"]
+        unknown_count = names.count("Unknown")
+
+        if known_names and unknown_count:
+            summary = f"[ENSEMBLE] Detected: {', '.join(known_names)} and {unknown_count} unknown"
+        elif known_names:
+            summary = f"[ENSEMBLE] Detected: {', '.join(known_names)}"
+        elif unknown_count:
+            summary = f"[ENSEMBLE] {unknown_count} unknown person(s)"
+        else:
+            summary = "[ENSEMBLE] No faces identified"
+
+        return {
+            "success": True,
+            "faces_detected": len(valid_faces),
+            "people": identified,
+            "summary": summary
+        }
+
+    except Exception as e:
+        logger.error(f"[ENSEMBLE] Error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "faces_detected": 0,
+            "people": [],
+            "summary": f"Error: {str(e)}",
+            "error": str(e)
+        }
+
+
 def identify_faces_in_image(image_bytes: bytes, threshold: float) -> dict[str, Any]:
     """Identify faces in an image."""
     global deepface, known_faces
@@ -760,14 +1081,13 @@ def identify_faces_in_image(image_bytes: bytes, threshold: float) -> dict[str, A
 @app.on_event("startup")
 async def startup_event():
     """Load known faces on startup."""
-    global known_faces
+    global known_faces, ensemble_faces
 
     # Get system info
     total_ram = get_total_ram_mb()
     available_ram = get_available_ram_mb()
     model_info = MODEL_INFO.get(MODEL_NAME, {})
     detector_info = DETECTOR_INFO.get(DETECTOR_BACKEND, {})
-    estimated_ram = model_info.get("ram_mb", 0) + detector_info.get("ram_mb", 0)
 
     logger.info("=" * 60)
     logger.info("Facial Recognition Add-on Starting")
@@ -780,34 +1100,71 @@ async def startup_event():
     logger.info("CONFIGURATION:")
     logger.info(f"  Hardware preset: {ACTIVE_PRESET}")
     logger.info(f"  Faces directory: {FACES_DIR}")
-    logger.info("")
-    logger.info("MODEL SETTINGS:")
-    logger.info(f"  Recognition model: {MODEL_NAME}")
-    logger.info(f"    - Accuracy: {model_info.get('accuracy', 'unknown')} ({model_info.get('accuracy_score', 'N/A')}% LFW)")
-    logger.info(f"    - Speed: {model_info.get('speed', 'unknown')}")
-    logger.info(f"    - RAM: ~{model_info.get('ram_mb', 'N/A')}MB")
-    logger.info(f"  Face detector: {DETECTOR_BACKEND}")
-    logger.info(f"    - Accuracy: {detector_info.get('accuracy', 'unknown')}")
-    logger.info(f"    - Speed: {detector_info.get('speed', 'unknown')}")
-    logger.info(f"    - RAM: ~{detector_info.get('ram_mb', 'N/A')}MB")
-    logger.info(f"  Estimated total RAM usage: ~{estimated_ram}MB")
+
+    if ENSEMBLE_MODE:
+        # Ensemble mode
+        logger.info("")
+        logger.info("ENSEMBLE MODE ENABLED!")
+        logger.info(f"  Models: {', '.join(ENSEMBLE_MODELS)}")
+        estimated_ram = sum(MODEL_INFO.get(m, {}).get("ram_mb", 0) for m in ENSEMBLE_MODELS)
+        estimated_ram += detector_info.get("ram_mb", 0)
+        logger.info(f"  Face detector: {DETECTOR_BACKEND}")
+        logger.info(f"  Estimated total RAM usage: ~{estimated_ram}MB")
+        logger.info("")
+        logger.info("Loading embeddings for all ensemble models...")
+        logger.info("(This may take a while with multiple models)")
+    else:
+        # Single model mode
+        estimated_ram = model_info.get("ram_mb", 0) + detector_info.get("ram_mb", 0)
+        logger.info("")
+        logger.info("MODEL SETTINGS:")
+        logger.info(f"  Recognition model: {MODEL_NAME}")
+        logger.info(f"    - Accuracy: {model_info.get('accuracy', 'unknown')} ({model_info.get('accuracy_score', 'N/A')}% LFW)")
+        logger.info(f"    - Speed: {model_info.get('speed', 'unknown')}")
+        logger.info(f"    - RAM: ~{model_info.get('ram_mb', 'N/A')}MB")
+        logger.info(f"  Face detector: {DETECTOR_BACKEND}")
+        logger.info(f"    - Accuracy: {detector_info.get('accuracy', 'unknown')}")
+        logger.info(f"    - Speed: {detector_info.get('speed', 'unknown')}")
+        logger.info(f"    - RAM: ~{detector_info.get('ram_mb', 'N/A')}MB")
+        logger.info(f"  Estimated total RAM usage: ~{estimated_ram}MB")
+
     logger.info("")
     logger.info("THRESHOLDS:")
     logger.info(f"  Distance threshold: {DISTANCE_THRESHOLD}")
     logger.info(f"  Min face confidence: {MIN_FACE_CONFIDENCE}")
     logger.info(f"  Min face size: {MIN_FACE_SIZE}px")
     logger.info("=" * 60)
-    known_faces = load_known_faces()
-    if not known_faces:
-        logger.info("")
-        logger.info("No faces loaded! To add people:")
-        logger.info(f"1. Go to {FACES_DIR} via Samba or SSH")
-        logger.info(f"2. Create a folder for each person (e.g., {FACES_DIR}/John/")
-        logger.info("3. Add 3-5 photos of their face to the folder")
-        logger.info("4. Restart this add-on or call POST /reload")
-        logger.info("")
+
+    # Load faces based on mode
+    if ENSEMBLE_MODE:
+        ensemble_faces = load_ensemble_faces()
+        if not ensemble_faces or not any(ensemble_faces.values()):
+            logger.info("")
+            logger.info("No faces loaded! To add people:")
+            logger.info(f"1. Go to {FACES_DIR} via Samba or SSH")
+            logger.info(f"2. Create a folder for each person (e.g., {FACES_DIR}/John/")
+            logger.info("3. Add 3-5 photos of their face to the folder")
+            logger.info("4. Restart this add-on or call POST /reload")
+            logger.info("")
+        else:
+            # Also populate known_faces with the primary model for backward compat
+            if ENSEMBLE_MODELS and ENSEMBLE_MODELS[0] in ensemble_faces:
+                known_faces = ensemble_faces[ENSEMBLE_MODELS[0]]
+    else:
+        known_faces = load_known_faces()
+        if not known_faces:
+            logger.info("")
+            logger.info("No faces loaded! To add people:")
+            logger.info(f"1. Go to {FACES_DIR} via Samba or SSH")
+            logger.info(f"2. Create a folder for each person (e.g., {FACES_DIR}/John/")
+            logger.info("3. Add 3-5 photos of their face to the folder")
+            logger.info("4. Restart this add-on or call POST /reload")
+            logger.info("")
+
     logger.info("=" * 60)
     logger.info(f"Server ready on http://{HOST}:{PORT}")
+    if ENSEMBLE_MODE:
+        logger.info(f"Running in ENSEMBLE mode with {len(ENSEMBLE_MODELS)} models")
     logger.info("=" * 60)
 
 
@@ -816,21 +1173,44 @@ async def startup_event():
 async def status():
     """Get server status and configuration info."""
     # Calculate estimated RAM usage
-    model_ram = MODEL_INFO.get(MODEL_NAME, {}).get("ram_mb", 0)
     detector_ram = DETECTOR_INFO.get(DETECTOR_BACKEND, {}).get("ram_mb", 0)
+
+    if ENSEMBLE_MODE:
+        model_ram = sum(MODEL_INFO.get(m, {}).get("ram_mb", 0) for m in ENSEMBLE_MODELS)
+        # Get people from first model in ensemble
+        if ensemble_faces and ENSEMBLE_MODELS:
+            first_model = ENSEMBLE_MODELS[0]
+            people = list(ensemble_faces.get(first_model, {}).keys())
+            total_emb = sum(
+                sum(len(e) for e in model_faces.values())
+                for model_faces in ensemble_faces.values()
+            )
+        else:
+            people = []
+            total_emb = 0
+        ensemble_emb_counts = {
+            m: sum(len(e) for e in faces.values())
+            for m, faces in ensemble_faces.items()
+        }
+    else:
+        model_ram = MODEL_INFO.get(MODEL_NAME, {}).get("ram_mb", 0)
+        people = list(known_faces.keys())
+        total_emb = sum(len(e) for e in known_faces.values())
+        ensemble_emb_counts = {}
+
     estimated_usage = model_ram + detector_ram
 
     return StatusResponse(
         status="running",
-        known_people=list(known_faces.keys()),
-        total_embeddings=sum(len(e) for e in known_faces.values()),
+        known_people=people,
+        total_embeddings=total_emb,
         faces_dir=FACES_DIR,
-        model=MODEL_NAME,
+        model=MODEL_NAME if not ENSEMBLE_MODE else f"ENSEMBLE ({len(ENSEMBLE_MODELS)} models)",
         threshold=DISTANCE_THRESHOLD,
         detector=DETECTOR_BACKEND,
         min_confidence=MIN_FACE_CONFIDENCE,
         min_face_size=MIN_FACE_SIZE,
-        # New fields
+        # Model/detector info
         hardware_preset=ACTIVE_PRESET,
         model_info=MODEL_INFO.get(MODEL_NAME, {}),
         detector_info=DETECTOR_INFO.get(DETECTOR_BACKEND, {}),
@@ -838,7 +1218,11 @@ async def status():
         available_ram_mb=get_available_ram_mb(),
         estimated_usage_mb=estimated_usage,
         available_models=list(MODEL_INFO.keys()),
-        available_detectors=list(DETECTOR_INFO.keys())
+        available_detectors=list(DETECTOR_INFO.keys()),
+        # Ensemble info
+        ensemble_mode=ENSEMBLE_MODE,
+        ensemble_models=ENSEMBLE_MODELS,
+        ensemble_embeddings=ensemble_emb_counts
     )
 
 
@@ -867,7 +1251,13 @@ async def identify_base64(request: IdentifyRequest):
     try:
         image_bytes = base64.b64decode(request.image_base64)
         threshold = request.tolerance or DISTANCE_THRESHOLD
-        result = identify_faces_in_image(image_bytes, threshold)
+
+        # Use ensemble or single model based on mode
+        if ENSEMBLE_MODE:
+            result = identify_with_ensemble(image_bytes, threshold)
+        else:
+            result = identify_faces_in_image(image_bytes, threshold)
+
         return IdentifyResponse(**result)
     except Exception as e:
         logger.error(f"Error in /identify: {e}", exc_info=True)

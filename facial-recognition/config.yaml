@@ -1,6 +1,6 @@
 name: "Facial Recognition"
 description: "DeepFace facial recognition server for HA Video Vision"
-version: "1.1.0"
+version: "1.2.0"
 slug: "facial_recognition"
 init: false
 arch:
@@ -23,14 +23,17 @@ options:
   # lightweight: Fast, low RAM (~300MB) - good for Raspberry Pi
   # balanced: Good balance of speed and accuracy (~1GB RAM)
   # accuracy: Best accuracy, higher resources (~1.5GB+ RAM)
+  # ultra: Maximum accuracy with VGG-Face (~3GB RAM)
+  # ensemble: Multi-model voting for highest accuracy (~6GB+ RAM)
   # custom: Use manual model_name and detector_backend settings
   hardware_preset: "balanced"
 
   # Manual model selection (only used when hardware_preset is "custom")
   # Models ordered by accuracy (best to worst):
+  # - GhostFaceNet: Newest model, excellent accuracy, ~1.8GB RAM
   # - ArcFace: State-of-the-art accuracy, ~1.5GB RAM, medium speed
   # - Facenet512: Excellent accuracy, ~1.2GB RAM, medium speed
-  # - VGG-Face: Very good accuracy, ~2.5GB RAM, slower
+  # - VGG-Face: Very good accuracy, ~2.5GB RAM, slower (largest embeddings)
   # - Facenet: Good accuracy, ~500MB RAM, fast
   # - SFace: Good accuracy, ~300MB RAM, fastest
   # - Dlib: Good accuracy, ~600MB RAM, medium speed
@@ -48,15 +51,21 @@ options:
   # - yolov8: Good accuracy, fast, ~300MB extra RAM (requires ultralytics)
   detector_backend: "retinaface"
 
+  # Ensemble mode settings (only used when hardware_preset is "ensemble")
+  # Models to use in ensemble voting (comma-separated)
+  # More models = more accuracy but more RAM and slower
+  ensemble_models: "ArcFace,Facenet512,VGG-Face"
+
   # Recognition thresholds
   distance_threshold: 0.45
   min_face_confidence: 0.80
   min_face_size: 40
 
 schema:
-  hardware_preset: list(auto|lightweight|balanced|accuracy|custom)
-  model_name: list(ArcFace|Facenet512|VGG-Face|Facenet|SFace|Dlib|OpenFace|DeepID)
+  hardware_preset: list(auto|lightweight|balanced|accuracy|ultra|ensemble|custom)
+  model_name: list(GhostFaceNet|ArcFace|Facenet512|VGG-Face|Facenet|SFace|Dlib|OpenFace|DeepID)
   detector_backend: list(retinaface|mtcnn|ssd|mediapipe|opencv|yolov8)
+  ensemble_models: str?
   distance_threshold: float
   min_face_confidence: float
   min_face_size: int
