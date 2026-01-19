@@ -293,9 +293,9 @@ def resolve_hardware_preset(
 # =============================================================================
 
 FACES_DIR = os.environ.get("FACES_DIR", "/share/faces")
-DISTANCE_THRESHOLD = float(os.environ.get("DISTANCE_THRESHOLD", "0.45"))
-MIN_FACE_CONFIDENCE = float(os.environ.get("MIN_FACE_CONFIDENCE", "0.80"))
-MIN_FACE_SIZE = int(os.environ.get("MIN_FACE_SIZE", "40"))
+DISTANCE_THRESHOLD = float(os.environ.get("DISTANCE_THRESHOLD", "0.50"))
+MIN_FACE_CONFIDENCE = float(os.environ.get("MIN_FACE_CONFIDENCE", "0.50"))
+MIN_FACE_SIZE = int(os.environ.get("MIN_FACE_SIZE", "20"))
 MAX_CONSIDERATION_DISTANCE = float(os.environ.get("MAX_CONSIDERATION_DISTANCE", "0.60"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8100"))

@@ -57,9 +57,21 @@ options:
   ensemble_models: "ArcFace,Facenet512,VGG-Face"
 
   # Recognition thresholds
-  distance_threshold: 0.45
-  min_face_confidence: 0.80
-  min_face_size: 40
+  # distance_threshold: How similar a face must be to match (lower = stricter)
+  #   0.30 = Very strict, may miss valid matches
+  #   0.50 = Balanced for doorbell cameras (recommended)
+  #   0.60 = Lenient, may have false positives
+  distance_threshold: 0.50
+
+  # min_face_confidence: Minimum detector confidence to accept a face (0.0-1.0)
+  #   Higher values reject uncertain detections, lower values detect at distance
+  min_face_confidence: 0.50
+
+  # min_face_size: Minimum face size in pixels to process
+  #   Lower values detect faces further from camera (doorbell distance)
+  #   20 = Good for doorbell cameras at 3-6 feet
+  #   40 = Better for close-up cameras
+  min_face_size: 20
 
 schema:
   hardware_preset: list(auto|lightweight|balanced|accuracy|ultra|ensemble|custom)
