@@ -133,8 +133,8 @@ variables:
   face_rec_enabled: !input facial_recognition_enabled
   face_rec_url: !input facial_recognition_url
   face_rec_confidence: !input facial_recognition_confidence
-  # Default prompt - factual and deterministic
-  default_prompt: "Briefly describe what you see. Only state what is clearly visible. Do not speculate. If a person is visible, describe their appearance and actions. 2-3 sentences max."
+  # Default prompt - always describe people when visible
+  default_prompt: "Describe what you see. If any people are visible, always describe them - their appearance, location, and what they are doing. Be concise (2-3 sentences)."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}

@@ -751,9 +751,9 @@ class VideoAnalyzer:
         else:
             prompt = (
                 "Describe what you see in this camera feed. "
-                "Only mention people if you clearly see them - do not assume or guess. "
-                "Note any activity, vehicles, or notable events. "
-                "Be concise (2-3 sentences). Say 'no activity' if nothing notable is happening."
+                "If any people are visible, always describe them - their appearance, location, and what they are doing. "
+                "Also note any vehicles or objects of interest. "
+                "Be concise (2-3 sentences)."
             )
         
         # Send to AI provider (returns description and effective provider used)
